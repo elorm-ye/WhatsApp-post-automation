@@ -1,0 +1,14 @@
+{
+  "name": "whatsapp-scheduler",
+  "version": "1.0.0",
+  "description": "WhatsApp post automation & scheduler",
+  "scripts": {
+    "start": "concurrently --names \"BACKEND,FRONTEND\" --prefix-colors \"green,cyan\" \"npm run server\" \"npm run client\"",
+    "server": "nodemon --watch backend backend/server.js",
+    "client": "npm run dev --prefix frontend",
+    "dev": "concurrently --names \"BACKEND,FRONTEND\" --prefix-colors \"green,cyan\" \"npm run server\" \"npm run client\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
