@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3001;
 
 // ── App State ─────────────────────────────────────────────────
 
-let autoMode = false;       // Manual mode by default for safety
+let autoMode = true;        // Auto-mode: cron sends posts automatically
 let lastSendTime = 0;       // Rate limiting: track last send timestamp
 const RATE_LIMIT_MS = 30000; // 30 seconds between posts
 const MAX_RETRIES = 3;
@@ -137,9 +137,16 @@ const startServer = async () => {
                     }
 
                     if (autoMode) {
-                        await executePost(post);
+                        // Only attempt send when WhatsApp is actually ready
+                        const { ready } = getWhatsAppStatus();
+                        if (!ready) {
+                            console.log(`⚠️  WhatsApp not ready yet. Marking post ${post.id} as pending.`);
+                            await updatePostStatus(post.id, 'pending');
+                        } else {
+                            await executePost(post);
+                        }
                     } else {
-                        // In manual mode, just mark as pending so the UI shows the "Send Now" button prominently
+                        // In manual mode, just mark as pending so the UI shows the "Send Now" button
                         await updatePostStatus(post.id, 'pending');
                         console.log(`🔔 Post ${post.id} is ready. Awaiting manual trigger.`);
                     }
