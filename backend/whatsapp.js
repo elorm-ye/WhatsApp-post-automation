@@ -100,43 +100,75 @@ const sendWhatsAppMessage = async (targetChat, text, mediaPath) => {
     await page.bringToFront();
 
     try {
-        // ── Step 1: Open search and find the chat ─────────────────────
+        // ── Step 1: Open the search box via keyboard shortcut ─────────
         console.log(`🔍 Searching for chat: "${targetChat}"`);
 
-        // Click the search icon/button to open the search panel
-        const searchOpeners = [
-            '[data-testid="chat-list-search"]',
-            'button[aria-label="Search or start new chat"]',
-            'span[data-icon="search"]',
-            '[data-icon="search"]',
-            'div[title="Search or start new chat"]'
-        ];
-        const searchOpener = await findElement(searchOpeners);
-        if (searchOpener) {
-            await searchOpener.click();
-            await page.waitForTimeout(600);
+        // Ctrl+F is WhatsApp Web's native search shortcut — most reliable method
+        await page.keyboard.press('Control+f');
+        await page.waitForTimeout(800);
+
+        // Find the active/focused search input — try multiple strategies
+        let searchBox = null;
+
+        // Strategy A: look for a focused contenteditable anywhere on the page
+        const focusedEditable = await page.evaluateHandle(() => document.activeElement);
+        const tag = await page.evaluate(el => el?.tagName, focusedEditable);
+        const ce = await page.evaluate(el => el?.contentEditable, focusedEditable);
+        if (tag && ce === 'true') {
+            searchBox = page.locator(':focus');
         }
 
-        // Locate the actual text input inside the search panel
-        const searchInputSelectors = [
-            '[data-testid="chat-list-search"] div[contenteditable="true"]',
-            'div[data-testid="search-input-container"] div[contenteditable="true"]',
-            '#side div[contenteditable="true"]',
-            'div[aria-label="Search input textbox"]',
-            'div[role="textbox"][aria-label*="Search"]'
-        ];
+        // Strategy B: try known selectors with short timeouts
+        if (!searchBox) {
+            const searchInputSelectors = [
+                'div[aria-label="Search input textbox"]',
+                'div[role="textbox"][aria-label*="Search"]',
+                '[data-testid="chat-list-search"] div[contenteditable="true"]',
+                'div[data-testid="search-input-container"] div[contenteditable="true"]',
+                '#side div[contenteditable="true"]',
+            ];
+            for (const sel of searchInputSelectors) {
+                try {
+                    const loc = page.locator(sel).first();
+                    await loc.waitFor({ state: 'visible', timeout: 3000 });
+                    searchBox = loc;
+                    break;
+                } catch { /* try next */ }
+            }
+        }
 
-        let searchBox = null;
-        for (const sel of searchInputSelectors) {
+        // Strategy C: click the search icon then grab any newly-visible contenteditable
+        if (!searchBox) {
+            const searchOpeners = [
+                'span[data-icon="search"]',
+                '[data-icon="search"]',
+                'button[aria-label="Search or start new chat"]',
+                'div[title="Search or start new chat"]',
+                '[data-testid="chat-list-search"]',
+            ];
+            for (const sel of searchOpeners) {
+                const el = await page.$(sel);
+                if (el) { await el.click(); await page.waitForTimeout(600); break; }
+            }
+            // Now grab the first visible contenteditable in the sidebar
             try {
-                const loc = page.locator(sel).first();
+                const loc = page.locator('#side div[contenteditable="true"]').first();
                 await loc.waitFor({ state: 'visible', timeout: 5000 });
                 searchBox = loc;
-                break;
-            } catch { /* try next */ }
+            } catch { /* still not found */ }
         }
 
-        if (!searchBox) throw new Error('Could not find the WhatsApp search box.');
+        // Strategy D: last resort — any visible contenteditable on the page
+        if (!searchBox) {
+            try {
+                const allEditables = page.locator('div[contenteditable="true"]');
+                const count = await allEditables.count();
+                console.log(`🔎 Found ${count} contenteditable elements on page`);
+                if (count > 0) searchBox = allEditables.first();
+            } catch { /* give up */ }
+        }
+
+        if (!searchBox) throw new Error('Could not find the WhatsApp search box. Make sure WhatsApp Web is open and logged in.');
 
         // Clear and type the chat name
         await searchBox.click();
@@ -145,17 +177,16 @@ const sendWhatsAppMessage = async (targetChat, text, mediaPath) => {
         await page.waitForTimeout(200);
         await searchBox.pressSequentially(targetChat, { delay: 60 });
 
-        // Wait for results to render
+        // Wait for search results to render
         await page.waitForTimeout(2500);
 
-        // ── Step 2: Click the first result ────────────────────────────
+        // ── Step 2: Click the first chat result ───────────────────────
         const resultSelectors = [
-            '[data-testid="cell-frame-container"]:first-child',
-            '#pane-side [role="listitem"]:first-child',
-            '#pane-side [role="row"]:first-child',
-            '#pane-side li:first-child',
-            // Generic: any clickable row in the side panel
-            '#pane-side div[tabindex="-1"]:first-child'
+            '[data-testid="cell-frame-container"]',
+            '#pane-side [role="listitem"]',
+            '#pane-side [role="row"]',
+            '#pane-side li',
+            '#pane-side div[tabindex="-1"]'
         ];
 
         let chatClicked = false;
